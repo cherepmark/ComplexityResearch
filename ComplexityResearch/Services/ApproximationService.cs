@@ -24,11 +24,11 @@ public sealed class ApproximationResult
     /// <summary>Текст с MSE в читаемом виде.</summary>
     public string MseText { get; init; } = string.Empty;
 
-    /// <summary>Функция f(n), использованная при аппроксимации.</summary>
-    public Func<double, double> FormulaFunction { get; init; } = _ => 1.0;
+    public string ComplexityClass { get; init; } = "O(n)";
 
     /// <summary>Вычисляет аппроксимированное время для размера n.</summary>
-    public double Evaluate(double n) => C * FormulaFunction(n);
+    public double Evaluate(double n) =>
+     C * ApproximationService.GetComplexityFunction(ComplexityClass)(n);
 }
 
 /// <summary>
@@ -65,8 +65,8 @@ public static class ApproximationService
         {
             return new ApproximationResult
             {
+                ComplexityClass = complexityClass,
                 Formula = "недостаточно точек",
-                FormulaFunction = f,
                 MseText = "MSE: недостаточно точек"
             };
         }
@@ -106,7 +106,7 @@ public static class ApproximationService
             C = c,
             R2 = r2,
             MSE = mse,
-            FormulaFunction = f,
+            ComplexityClass = complexityClass,
             Formula = $"Tapprox(n) = {Format(c)}·{GetComplexitySymbol(complexityClass)}  (R² = {r2:F4})",
             MseText = $"MSE = {Format(mse)} (единицы² измерения)"
         };
