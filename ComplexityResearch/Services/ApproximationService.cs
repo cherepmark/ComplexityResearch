@@ -24,16 +24,11 @@ public sealed class ApproximationResult
     /// <summary>Текст с MSE в читаемом виде.</summary>
     public string MseText { get; init; } = string.Empty;
 
-    /// <summary>
-    /// Класс сложности ("O(1)", "O(log n)", "O(n)", "O(n log n)", "O(n^2)", "O(n^3)").
-    /// Хранится строкой вместо делегата — корректно сериализуется в JSON
-    /// и позволяет восстановить f(n) через <see cref="ApproximationService.GetComplexityFunction"/>.
-    /// </summary>
-    public string ComplexityClass { get; init; } = "O(n)";
+    /// <summary>Функция f(n), использованная при аппроксимации.</summary>
+    public Func<double, double> FormulaFunction { get; init; } = _ => 1.0;
 
-    /// <summary>Вычисляет аппроксимированное время для размера n: C · f(n).</summary>
-    public double Evaluate(double n) =>
-        C * ApproximationService.GetComplexityFunction(ComplexityClass)(n);
+    /// <summary>Вычисляет аппроксимированное время для размера n.</summary>
+    public double Evaluate(double n) => C * FormulaFunction(n);
 }
 
 /// <summary>
@@ -70,8 +65,8 @@ public static class ApproximationService
         {
             return new ApproximationResult
             {
-                ComplexityClass = complexityClass,
                 Formula = "недостаточно точек",
+                FormulaFunction = f,
                 MseText = "MSE: недостаточно точек"
             };
         }
@@ -111,7 +106,7 @@ public static class ApproximationService
             C = c,
             R2 = r2,
             MSE = mse,
-            ComplexityClass = complexityClass,
+            FormulaFunction = f,
             Formula = $"Tapprox(n) = {Format(c)}·{GetComplexitySymbol(complexityClass)}  (R² = {r2:F4})",
             MseText = $"MSE = {Format(mse)} (единицы² измерения)"
         };

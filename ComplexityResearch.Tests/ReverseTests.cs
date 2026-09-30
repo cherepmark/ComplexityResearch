@@ -1,11 +1,11 @@
-﻿using ComplexityResearch.Algorithms;
+using ComplexityResearch.Algorithms;
 using ComplexityResearch.Services;
 using Xunit;
 
 namespace ComplexityResearch.Tests;
 
 /// <summary>
-/// Тесты реверса массива (№12).
+/// Тесты реверса массива (№12) — вклад участника Dev3.
 /// </summary>
 public class ReverseTests
 {
