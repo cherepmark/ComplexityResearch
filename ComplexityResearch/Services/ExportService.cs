@@ -174,6 +174,83 @@ public static class ExportService
         return $"{stem}_{DateTime.Now:yyyy-MM-dd}";
     }
 
+    /// <summary>
+    /// Экспорт ДВУМЕРНОГО матричного эксперимента A(n×m)·B(m×n) в CSV:
+    /// все тройки (n, m, время) построчно.
+    /// </summary>
+    public static void ExportMatrixNmCsv(
+        string experimentName,
+        BenchmarkConfiguration nRange,
+        BenchmarkConfiguration mRange,
+        IReadOnlyList<MatrixNMResult> results,
+        string summary,
+        string path)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# Экспорт двумерного матричного эксперимента A(n×m)·B(m×n)");
+        sb.AppendLine($"# Дата (UTC): {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"# Диапазон n: StartN={nRange.StartN}, Nmax={nRange.EndN}, step={nRange.StepN}");
+        sb.AppendLine($"# Диапазон m: StartN={mRange.StartN}, Mmax={mRange.EndN}, step={mRange.StepN}");
+        sb.AppendLine($"# Запусков на ячейку: {nRange.RunsPerPoint}; seed={nRange.RandomSeed}; лимит ячейки={nRange.MaxSecondsPerPoint} с");
+        sb.AppendLine();
+        sb.AppendLine("n;m;Запусков;Среднее_нс;Мин_нс;Макс_нс;СтОткл_нс;Операций;Из_кэша");
+        foreach (var r in results)
+        {
+            sb.AppendLine(string.Join(';',
+                r.N.ToString(CultureInfo.InvariantCulture),
+                r.M.ToString(CultureInfo.InvariantCulture),
+                r.RunsCount.ToString(CultureInfo.InvariantCulture),
+                r.Statistics.MeanNs.ToString("F1", CultureInfo.InvariantCulture),
+                r.Statistics.MinNs.ToString("F1", CultureInfo.InvariantCulture),
+                r.Statistics.MaxNs.ToString("F1", CultureInfo.InvariantCulture),
+                r.Statistics.StdDevNs.ToString("F1", CultureInfo.InvariantCulture),
+                r.OperationsTotal.ToString(CultureInfo.InvariantCulture),
+                r.IsFromCache ? "да" : "нет"));
+        }
+        sb.AppendLine();
+        sb.AppendLine("# Сводка:");
+        foreach (var line in summary.Split(Environment.NewLine))
+        {
+            sb.AppendLine($"# {line}");
+        }
+        File.WriteAllText(path, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+    }
+
+    /// <summary>Экспорт двумерного матричного эксперимента в JSON.</summary>
+    public static void ExportMatrixNmJson(
+        string experimentName,
+        BenchmarkConfiguration nRange,
+        BenchmarkConfiguration mRange,
+        IReadOnlyList<MatrixNMResult> results,
+        string summary,
+        string path)
+    {
+        var dto = new
+        {
+            Experiment = experimentName,
+            CreatedUtc = DateTime.UtcNow,
+            NRange = new { nRange.StartN, NMax = nRange.EndN, Step = nRange.StepN },
+            MRange = new { mRange.StartN, MMax = mRange.EndN, Step = mRange.StepN },
+            RunsPerPoint = nRange.RunsPerPoint,
+            Summary = summary,
+            Cells = results.Select(r => new
+            {
+                r.N,
+                r.M,
+                r.RunsCount,
+                MeanNs = r.Statistics.MeanNs,
+                MinNs = r.Statistics.MinNs,
+                MaxNs = r.Statistics.MaxNs,
+                StdDevNs = r.Statistics.StdDevNs,
+                r.OperationsTotal,
+                r.IsFromCache,
+                RunTimesNs = r.RunTimesNs
+            })
+        };
+        string json = JsonSerializer.Serialize(dto, JsonOptions);
+        File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
     private static string BuildModeNote(IReadOnlyList<BenchmarkResult> results)
     {
         if (results.All(r => r.IsFromCache))

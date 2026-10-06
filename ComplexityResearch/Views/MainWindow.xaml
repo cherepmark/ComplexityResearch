@@ -78,6 +78,39 @@
                             Command="{Binding RunPowerExperimentCommand}"
                             Background="#5B4B8A" Foreground="White" Margin="0,6,0,0"/>
 
+                    <Separator Margin="0,10"/>
+
+                    <!-- Двумерный эксперимент: матрицы A(n×m)·B(m×n) -->
+                    <TextBlock Text="Матрицы A(n×m)·B(m×n) — тепловая карта"
+                               FontWeight="Bold" Foreground="#1F3B5C" Margin="0,4,0,4"/>
+                    <TextBlock Text="Диапазоны n и m (Start / Nmax / step):" FontSize="11" Foreground="#555"/>
+                    <Grid Margin="0,3,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="30"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition/>
+                            <RowDefinition/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="n:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding MatrixNStartText}" Margin="4,0,3,0"/>
+                        <TextBox Grid.Column="2" Text="{Binding MatrixNMaxText}" Margin="0,0,3,0"/>
+                        <TextBox Grid.Column="3" Text="{Binding MatrixNStepText}"/>
+                        <TextBlock Grid.Row="1" Text="m:" VerticalAlignment="Center"/>
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding MatrixMStartText}" Margin="4,4,3,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding MatrixMMaxText}" Margin="0,4,3,0"/>
+                        <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding MatrixMStepText}" Margin="0,4,0,0"/>
+                    </Grid>
+                    <TextBlock Text="Запуски, seed и лимит ячейки берутся из общих настроек выше."
+                               FontSize="10" Foreground="#888" TextWrapping="Wrap"/>
+                    <Button Content="Запустить матрицы A(n×m)·B(m×n)"
+                            Command="{Binding RunMatrixNMCommand}"
+                            Background="#8A5B4B" Foreground="White" Margin="0,6,0,0"
+                            ToolTip="Сетка n×m: для каждой пары перемножаются A(n×m)·B(m×n); результат — одна тепловая карта (X = n, Y = m, цвет = время)"/>
+
                     <TextBlock Text="Статус:" FontWeight="SemiBold" Margin="0,12,0,0"/>
                     <ProgressBar Height="14" Minimum="0" Maximum="100"
                                  Value="{Binding ProgressPercent, Mode=OneWay}"
@@ -152,13 +185,23 @@
                     <RadioButton Content="Логарифмическая" GroupName="ScaleY"
                                  VerticalAlignment="Center" Margin="0,0,14,0"
                                  Checked="Scale_CheckedChanged"/>
+                    <CheckBox Content="Наложить предыдущий график (одни оси)"
+                              IsChecked="{Binding OverlayPrevious}"
+                              VerticalAlignment="Center" Margin="0,0,10,0"
+                              ToolTip="Серии предыдущего эксперимента будут показаны на одних координатах с текущими (пунктиром, с пометкой «пред.»)"/>
                 </StackPanel>
             </DockPanel>
 
-            <!-- График -->
-            <Border Grid.Row="1" Background="White" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4">
-                <controls:ChartControl x:Name="Chart"/>
-            </Border>
+            <!-- График (линии) и тепловая карта (A(n×m)·B(m×n)) — показывается один из них -->
+            <Grid Grid.Row="1">
+                <Border x:Name="ChartHost" Background="White" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4">
+                    <controls:ChartControl x:Name="Chart"/>
+                </Border>
+                <Border x:Name="HeatmapHost" Background="White" BorderBrush="#DDDDDD" BorderThickness="1"
+                        CornerRadius="4" Visibility="Collapsed">
+                    <controls:HeatmapControl x:Name="Heatmap"/>
+                </Border>
+            </Grid>
 
             <!-- MSE и аппроксимация — рядом с графиком -->
             <Border Grid.Row="2" Background="#EFF5EF" BorderBrush="#CDE3CD" BorderThickness="1"

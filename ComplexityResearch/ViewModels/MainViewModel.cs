@@ -16,6 +16,7 @@ public sealed class MainViewModel : ViewModelBase
 {
     private readonly BenchmarkService _benchmarkService = new();
     private readonly OperationBenchmarkService _operationBenchmarkService = new();
+    private readonly MatrixNMBenchmarkService _matrixNMService = new();
     private BenchmarkDatabase? _database;
     private CancellationTokenSource? _cancellationTokenSource;
     private bool _isBusy;
@@ -202,8 +203,63 @@ public sealed class MainViewModel : ViewModelBase
     /// <summary>Данные для построения графика после эксперимента.</summary>
     public event EventHandler<ChartData>? ExperimentCompleted;
 
+    /// <summary>Данные тепловой карты после двумерного эксперимента A(n×m)·B(m×n).</summary>
+    public event EventHandler<HeatmapData>? HeatmapCompleted;
+
     /// <summary>Запрос на сохранение графика в PNG.</summary>
     public event EventHandler<string>? PngExportRequested;
+
+    // --- Двумерный матричный эксперимент A(n×m)·B(m×n) ---
+
+    private string _matrixNStartText = "50";
+    private string _matrixNMaxText = "250";
+    private string _matrixNStepText = "50";
+    private string _matrixMStartText = "50";
+    private string _matrixMMaxText = "250";
+    private string _matrixMStepText = "50";
+    private List<MatrixNMResult> _lastMatrixNMResults = new();
+    private BenchmarkConfiguration _lastMatrixNRange = new();
+    private BenchmarkConfiguration _lastMatrixMRange = new();
+    private ChartData? _previousChartData;
+    private bool _lastExperimentWasMatrixNM;
+
+    /// <summary>Начальное n (строки матрицы A).</summary>
+    public string MatrixNStartText { get => _matrixNStartText; set => SetProperty(ref _matrixNStartText, value); }
+
+    /// <summary>Nmax по n.</summary>
+    public string MatrixNMaxText { get => _matrixNMaxText; set => SetProperty(ref _matrixNMaxText, value); }
+
+    /// <summary>Шаг по n.</summary>
+    public string MatrixNStepText { get => _matrixNStepText; set => SetProperty(ref _matrixNStepText, value); }
+
+    /// <summary>Начальное m (внутреннее измерение).</summary>
+    public string MatrixMStartText { get => _matrixMStartText; set => SetProperty(ref _matrixMStartText, value); }
+
+    /// <summary>Mmax по m.</summary>
+    public string MatrixMMaxText { get => _matrixMMaxText; set => SetProperty(ref _matrixMMaxText, value); }
+
+    /// <summary>Шаг по m.</summary>
+    public string MatrixMStepText { get => _matrixMStepText; set => SetProperty(ref _matrixMStepText, value); }
+
+    private bool _overlayPrevious;
+
+    /// <summary>
+    /// Наложить предыдущий эксперимент на одни координаты: на графике будут
+    /// видны серии текущего И предыдущего запуска одновременно.
+    /// </summary>
+    public bool OverlayPrevious { get => _overlayPrevious; set => SetProperty(ref _overlayPrevious, value); }
+
+    private string _matrixResultsText = string.Empty;
+
+    /// <summary>Сводка по двумерному эксперименту.</summary>
+    public string MatrixResultsText
+    {
+        get => _matrixResultsText;
+        set => SetProperty(ref _matrixResultsText, value);
+    }
+
+    /// <summary>Команда запуска двумерного матричного эксперимента.</summary>
+    public RelayCommand RunMatrixNMCommand { get; }
 
     /// <summary>Создаёт ViewModel; регистрирует команды, алгоритмы и БД.</summary>
     public MainViewModel()
@@ -218,11 +274,12 @@ public sealed class MainViewModel : ViewModelBase
         PrepareDataCommand = new RelayCommand(_ => PrepareData(), _ => !IsBusy);
         RunExperimentCommand = new RelayCommand(_ => RunExperimentAsync(), _ => !IsBusy);
         RunPowerExperimentCommand = new RelayCommand(_ => RunPowerExperimentAsync(), _ => !IsBusy);
+        RunMatrixNMCommand = new RelayCommand(_ => RunMatrixNMAsync(), _ => !IsBusy);
         CancelCommand = new RelayCommand(_ => _cancellationTokenSource?.Cancel(), _ => IsBusy);
         CalibrateCommand = new RelayCommand(_ => CalibrateAsync(), _ => !IsBusy);
-        ExportCsvCommand = new RelayCommand(_ => ExportCsv(), _ => !IsBusy && Results.Count > 0);
-        ExportJsonCommand = new RelayCommand(_ => ExportJson(), _ => !IsBusy && Results.Count > 0);
-        ExportPngCommand = new RelayCommand(_ => ExportPng(), _ => !IsBusy && Results.Count > 0);
+        ExportCsvCommand = new RelayCommand(_ => ExportCsv(), _ => !IsBusy && (Results.Count > 0 || _lastMatrixNMResults.Count > 0));
+        ExportJsonCommand = new RelayCommand(_ => ExportJson(), _ => !IsBusy && (Results.Count > 0 || _lastMatrixNMResults.Count > 0));
+        ExportPngCommand = new RelayCommand(_ => ExportPng(), _ => !IsBusy && (Results.Count > 0 || _lastMatrixNMResults.Count > 0));
     }
 
     /// <summary>Команда «Подготовить данные».</summary>
@@ -447,7 +504,24 @@ public sealed class MainViewModel : ViewModelBase
 
         // График: эксперимент + теория + аппроксимация (в заголовке серии — MSE).
         var series = BuildChartSeries(results, fit);
-        ExperimentCompleted?.Invoke(this, new ChartData($"{_selectedAlgorithm.Name} — MSE = {FormatMse(fit.MSE)} нс²", series));
+        _lastExperimentWasMatrixNM = false;
+
+        // Задача «два графика на одних координатах»: если включён режим
+        // наложения и есть предыдущий эксперимент — добавляем его серии
+        // (с пометкой «пред.») на те же оси.
+        var allSeries = new List<ChartSeriesData>(series);
+        string chartTitle = $"{_selectedAlgorithm.Name} — MSE = {FormatMse(fit.MSE)} нс²";
+        if (OverlayPrevious && _previousChartData != null)
+        {
+            foreach (var s in _previousChartData.Series)
+            {
+                allSeries.Add(new ChartSeriesData($"пред. {s.Title}", s.ColorHex, s.Points, Dashed: true, ShowPoints: s.ShowPoints));
+            }
+            chartTitle += " (наложен предыдущий эксперимент)";
+        }
+        ExperimentCompleted?.Invoke(this, new ChartData(chartTitle, allSeries));
+        // Запоминаем ТЕКУЩИЙ эксперимент (без наложенных серий) как предыдущий.
+        _previousChartData = new ChartData(_selectedAlgorithm.Name, series);
 
         ConclusionText = BuildConclusion(_selectedAlgorithm, results, fit);
 
@@ -659,6 +733,153 @@ public sealed class MainViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Двумерный матричный эксперимент A(n×m)·B(m×n): сетка значений n и m,
+    /// все тройки (n, m, время) одной тепловой картой.
+    /// </summary>
+    private async Task RunMatrixNMAsync()
+    {
+        BenchmarkConfiguration nCfg, mCfg;
+        try
+        {
+            nCfg = new BenchmarkConfiguration
+            {
+                StartN = ParseLong(MatrixNStartText, "Начальное n"),
+                EndN = ParseLong(MatrixNMaxText, "Nmax по n"),
+                StepN = ParseLong(MatrixNStepText, "Шаг по n"),
+                RunsPerPoint = (int)ParseLong(RunsText, "Количество запусков"),
+                RandomSeed = (int)ParseLong(RandomSeedText, "Seed"),
+                MaxSecondsPerPoint = ParseDouble(MaxTimeText, "Лимит времени ячейки")
+            };
+            mCfg = new BenchmarkConfiguration
+            {
+                StartN = ParseLong(MatrixMStartText, "Начальное m"),
+                EndN = ParseLong(MatrixMMaxText, "Mmax по m"),
+                StepN = ParseLong(MatrixMStepText, "Шаг по m"),
+                RunsPerPoint = (int)ParseLong(RunsText, "Количество запусков"),
+                RandomSeed = (int)ParseLong(RandomSeedText, "Seed"),
+                MaxSecondsPerPoint = ParseDouble(MaxTimeText, "Лимит времени ячейки")
+            };
+            MatrixNMBenchmarkService.Validate(nCfg, mCfg);
+        }
+        catch (ArgumentException ex)
+        {
+            ShowError(ex.Message);
+            return;
+        }
+
+        // Предупреждение: общее число замеров = (кол-во n) × (кол-во m) × запуски.
+        var nSizes = BenchmarkService.GenerateSizes(nCfg);
+        var mSizes = BenchmarkService.GenerateSizes(mCfg);
+        long totalMeasurements = (long)nSizes.Length * mSizes.Length * (nCfg.RunsPerPoint + 1);
+        bool bigMaxSmallStep =
+            (nCfg.EndN >= 500 && nCfg.StepN <= 25) || (mCfg.EndN >= 500 && mCfg.StepN <= 25);
+        if (totalMeasurements > 500 || bigMaxSmallStep)
+        {
+            var answer = MessageBox.Show(
+                "Диапазоны n и m заданы так, что эксперимент может выполняться очень долго:\n\n" +
+                $"значений n: {nSizes.Length}, значений m: {mSizes.Length}, запусков на ячейку: {nCfg.RunsPerPoint + 1} (включая прогрев).\n" +
+                $"Общее число замеров = {nSizes.Length} × {mSizes.Length} × {nCfg.RunsPerPoint + 1} = {totalMeasurements:N0}." +
+                (bigMaxSmallStep ? "\nМаксимум по оси ≥ 500 при маленьком шаге." : string.Empty) +
+                "\n\nПродолжить?",
+                "Большая сетка замеров", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        IsBusy = true;
+        _lastMatrixNMResults.Clear();
+        Results.Clear();
+        MatrixResultsText = string.Empty;
+        MseText = "MSE: —";
+        StatusText = "Выполняется…";
+        _cancellationTokenSource = new CancellationTokenSource();
+        var progress = new Progress<BenchmarkProgress>(p =>
+        {
+            ProgressPercent = p.PercentComplete;
+            CurrentDetailsText = p.DetailsText;
+            StatusText = $"Выполняется {p.PercentComplete}%";
+        });
+
+        try
+        {
+            var outcome = await _matrixNMService.RunAsync(
+                nCfg, mCfg, CostModel, progress, _cancellationTokenSource.Token,
+                database: _database, useCache: UseCache, forceRecalculation: ForceRecalculation);
+
+            _lastMatrixNMResults = outcome.Results.ToList();
+            _lastMatrixNRange = nCfg;
+            _lastMatrixMRange = mCfg;
+            _lastExperimentWasMatrixNM = true;
+            ProgressPercent = 100;
+            StatusText = $"Готово: {_lastMatrixNMResults.Count} ячеек (n×m)";
+
+            // ОДНО связное представление: все тройки (n, m, время) на тепловой карте.
+            var cells = _lastMatrixNMResults
+                .Select(r => new HeatmapCell(r.N, r.M, r.Statistics.MeanNs / 1e9))
+                .ToList();
+            HeatmapCompleted?.Invoke(this, new HeatmapData(
+                "Умножение матриц A(n×m)·B(m×n) — время, с",
+                "n (строки A)",
+                "m (столбцы A = строки B)",
+                "Время, с",
+                cells));
+
+            // Модель t = C·n²·m: коэффициент C и MSE по всем тройкам.
+            var fit = MatrixNMBenchmarkService.FitPowerNM(_lastMatrixNMResults);
+            MseText = $"MSE = {FormatMse(fit.MSE)} нс² (модель t = C·n²·m), C = {FormatMse(fit.C)}";
+
+            var cached = _lastMatrixNMResults.Count(r => r.IsFromCache);
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Двумерный эксперимент: {nSizes.Length} значений n × {mSizes.Length} значений m = {_lastMatrixNMResults.Count} троек (n, m, время).");
+            sb.AppendLine($"Аппроксимация: {fit.Formula} (теория: t ∝ n²·m — n² ячеек результата по m умножений каждая).");
+            sb.AppendLine($"MSE = {FormatMse(fit.MSE)} нс². Из кэша БД: {cached} ячеек.");
+            sb.AppendLine("Тёплый цвет ячейки — большее время; рост виден одновременно по обеим осям.");
+            MatrixResultsText = sb.ToString();
+            ConclusionText = sb.ToString();
+
+            if (_database != null && outcome.ExperimentId > 0)
+            {
+                try
+                {
+                    _database.UpdateExperimentSummary(outcome.ExperimentId, fit.MSE, fit.C, sb.ToString());
+                }
+                catch
+                {
+                    // Итоги в БД не критичны.
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Остановлено пользователем. Частичные результаты в БД сохранены.";
+        }
+        catch (PointTimeoutException ex)
+        {
+            StatusText = "Остановлено: превышен лимит времени ячейки.";
+            MessageBox.Show(ex.Message, "Лимит времени", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (OutOfMemoryException)
+        {
+            StatusText = "Ошибка";
+            ShowError("Недостаточно памяти для матриц такого размера. Уменьшите Nmax/Mmax.");
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Ошибка";
+            ShowError($"Ошибка двумерного эксперимента: {ex.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
+            RefreshDbInfo();
+        }
+    }
+
     private async Task CalibrateAsync()
     {
         StatusText = "Калибровка констант (несколько секунд)…";
@@ -685,18 +906,33 @@ public sealed class MainViewModel : ViewModelBase
 
     private void ExportCsv() => Export("csv", path =>
     {
+        if (_lastExperimentWasMatrixNM)
+        {
+            ExportService.ExportMatrixNmCsv(
+                MatrixNMBenchmarkService.ExperimentName, _lastMatrixNRange, _lastMatrixMRange,
+                _lastMatrixNMResults, MatrixResultsText, path);
+            return;
+        }
         var report = ExportService.CreateReport(SelectedAlgorithm, ReadConfiguration(), CostModel, Results, ConclusionText, _lastApproximation);
         ExportService.ExportCsv(report, path);
     });
 
     private void ExportJson() => Export("json", path =>
     {
+        if (_lastExperimentWasMatrixNM)
+        {
+            ExportService.ExportMatrixNmJson(
+                MatrixNMBenchmarkService.ExperimentName, _lastMatrixNRange, _lastMatrixMRange,
+                _lastMatrixNMResults, MatrixResultsText, path);
+            return;
+        }
         var report = ExportService.CreateReport(SelectedAlgorithm, ReadConfiguration(), CostModel, Results, ConclusionText, _lastApproximation);
         ExportService.ExportJson(report, path);
     });
 
     private void ExportPng() =>
-        PngExportRequested?.Invoke(this, ExportService.MakeFileStem(SelectedAlgorithm.Name) + ".png");
+        PngExportRequested?.Invoke(this,
+            ExportService.MakeFileStem(_lastExperimentWasMatrixNM ? "MatrixNM" : SelectedAlgorithm.Name) + ".png");
 
     private static void Export(string extension, Action<string> save)
     {

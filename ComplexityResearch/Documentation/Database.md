@@ -32,12 +32,13 @@ CREATE TABLE Experiments (
 CREATE TABLE Measurements (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     ExperimentId INTEGER NOT NULL REFERENCES Experiments(Id) ON DELETE CASCADE,
-    N              INTEGER NOT NULL,   -- размер входных данных
-    RunNumber      INTEGER NOT NULL,   -- номер отдельного запуска (1..K)
-    ElapsedTimeNs  REAL NOT NULL,      -- время запуска (для операций-бенчмарка 0)
-    StepCount      REAL NOT NULL,      -- количество элементарных операций
-    TheoreticalNs  REAL NOT NULL,      -- теоретическое значение для этой точки
-    ExperimentDate TEXT NOT NULL);     -- дата/время измерения (UTC)
+    N INTEGER NOT NULL,                 -- размер входных данных (строки матрицы A в NM-эксперименте)
+    M INTEGER NOT NULL DEFAULT 1,       -- внутреннее измерение A(n×m)·B(m×n); для 1D-замеров M = 1
+    RunNumber INTEGER NOT NULL,         -- номер отдельного запуска (1..K)
+    ElapsedTimeNs REAL NOT NULL,        -- время запуска (для операций-бенчмарка 0)
+    StepCount REAL NOT NULL,            -- количество элементарных операций
+    TheoreticalNs REAL NOT NULL,        -- теоретическое значение для этой точки
+    ExperimentDate TEXT NOT NULL);      -- дата/время измерения (UTC)
 ```
 
 Минимально требуемые поля — Algorithm, n, RunNumber, ElapsedTime, StepCount,
@@ -54,7 +55,13 @@ SHA-256 ( режим | алгоритм | класс сложности | StartN
 В хэш входят константы стоимости: после калибровки ключ меняется, и старые
 результаты не считаются подходящими (теоретические значения изменились).
 Режим («TIME» для времени, «OPS» для операций) не даёт смешивать данные
-разных типов бенчмарка.
+разных типов бенчмарка. Двумерный матричный эксперимент A(n×m)·B(m×n) —
+ОТДЕЛЬНЫЙ вид эксперимента: ключ с тегом «MATNM» включает ОБА диапазона
+(n и m), а в `Measurements` у каждой строки заполнена колонка M. Так 3D/heatmap-
+эксперимент не смешивается с обычным 2D-замером квадратных матриц.
+
+Старые БД (без колонки M) мигрируют автоматически: `ALTER TABLE ... ADD COLUMN
+M INTEGER NOT NULL DEFAULT 1` — данные не теряются.
 
 ## Режимы работы
 

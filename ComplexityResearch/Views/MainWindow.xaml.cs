@@ -22,12 +22,16 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel();
         DataContext = _viewModel;
         _viewModel.ExperimentCompleted += OnExperimentCompleted;
+        _viewModel.HeatmapCompleted += OnHeatmapCompleted;
         _viewModel.PngExportRequested += OnPngExportRequested;
     }
 
-    /// <summary>Обновляет график после завершения эксперимента.</summary>
+    /// <summary>Обновляет график после одномерного эксперимента (карта скрывается).</summary>
     private void OnExperimentCompleted(object? sender, ChartData data)
     {
+        HeatmapHost.Visibility = Visibility.Collapsed;
+        ChartHost.Visibility = Visibility.Visible;
+
         var series = data.Series.Select(s => new ChartSeries
         {
             Title = s.Title,
@@ -40,7 +44,15 @@ public partial class MainWindow : Window
         Chart.SetData(data.Title, "Размер входных данных n", "Время, с", series);
     }
 
-    /// <summary>Сохраняет текущий график в PNG (имя вида «QuickSort_2026-09-14.png»).</summary>
+    /// <summary>Показывает тепловую карту A(n×m)·B(m×n) вместо линейного графика.</summary>
+    private void OnHeatmapCompleted(object? sender, HeatmapData data)
+    {
+        ChartHost.Visibility = Visibility.Collapsed;
+        HeatmapHost.Visibility = Visibility.Visible;
+        Heatmap.SetData(data);
+    }
+
+    /// <summary>Сохраняет видимую визуализацию (график или карту) в PNG.</summary>
     private void OnPngExportRequested(object? sender, string fileName)
     {
         var dialog = new Microsoft.Win32.SaveFileDialog
@@ -51,8 +63,15 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() != true) return;
         try
         {
-            Chart.ExportPng(dialog.FileName);
-            MessageBox.Show($"График сохранён: {dialog.FileName}", "Экспорт графика",
+            if (HeatmapHost.Visibility == Visibility.Visible)
+            {
+                Heatmap.ExportPng(dialog.FileName);
+            }
+            else
+            {
+                Chart.ExportPng(dialog.FileName);
+            }
+            MessageBox.Show($"Файл сохранён: {dialog.FileName}", "Экспорт графика",
                 MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)

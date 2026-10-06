@@ -101,15 +101,46 @@ public sealed class BenchmarkDatabase : IDisposable
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ExperimentId INTEGER NOT NULL,
                 N INTEGER NOT NULL,
+                M INTEGER NOT NULL DEFAULT 1,
                 RunNumber INTEGER NOT NULL,
                 ElapsedTimeNs REAL NOT NULL,
                 StepCount REAL NOT NULL,
                 TheoreticalNs REAL NOT NULL,
                 ExperimentDate TEXT NOT NULL,
                 FOREIGN KEY(ExperimentId) REFERENCES Experiments(Id) ON DELETE CASCADE);
-            CREATE INDEX IF NOT EXISTS IX_Measurements_HashN ON Measurements(ExperimentId, N, RunNumber);
+            CREATE INDEX IF NOT EXISTS IX_Measurements_HashN ON Measurements(ExperimentId, N, M, RunNumber);
             """;
         cmd.ExecuteNonQuery();
+        Migrate();
+    }
+
+    /// <summary>
+    /// Миграция старых БД: добавляет колонку M (внутреннее измерение
+    /// матричного эксперимента A(n×m)·B(m×n)); для обычных одномерных
+    /// замеров M = 1. Старые данные не теряются.
+    /// </summary>
+    private void Migrate()
+    {
+        using var connection = OpenConnection();
+        bool hasM = false;
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(Measurements);";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1) == "M")
+                {
+                    hasM = true;
+                }
+            }
+        }
+        if (!hasM)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "ALTER TABLE Measurements ADD COLUMN M INTEGER NOT NULL DEFAULT 1;";
+            cmd.ExecuteNonQuery();
+        }
     }
 
     private SqliteConnection OpenConnection()
@@ -147,11 +178,44 @@ public sealed class BenchmarkDatabase : IDisposable
     }
 
     /// <summary>
+    /// Ключ кэша ДВУМЕРНОГО матричного эксперимента A(n×m)·B(m×n):
+    /// отдельный тег режима «MATNM» (не смешивается с обычным 2D-замером
+    /// матриц «TIME» и операционным «OPS») + ОБА диапазона (n и m) +
+    /// параметры запусков + константы стоимости.
+    /// </summary>
+    public static string ComputeMatrixNMHash(
+        BenchmarkConfiguration nRange, BenchmarkConfiguration mRange, OperationCostModel cost)
+    {
+        string payload = string.Join('|',
+            "MATNM",
+            "MatrixNM",
+            nRange.StartN, nRange.EndN, nRange.StepN,
+            mRange.StartN, mRange.EndN, mRange.StepN,
+            nRange.RunsPerPoint, nRange.RandomSeed,
+            nRange.PhysicalBlockLimit,
+            cost.AdditionCost.ToString("R"),
+            cost.MultiplicationCost.ToString("R"),
+            cost.ComparisonCost.ToString("R"),
+            cost.AssignmentCost.ToString("R"),
+            cost.SwapCost.ToString("R"),
+            cost.ArrayAccessCost.ToString("R"));
+        byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(bytes);
+    }
+
+    /// <summary>
     /// Создаёт запись эксперимента и возвращает её Id. Измерения добавляются
     /// через <see cref="SaveMeasurement"/> по мере выполнения точек (частичные
     /// результаты тоже сохраняются, например при отмене или таймауте).
     /// </summary>
-    public long BeginExperiment(string configHash, AlgorithmBase algorithm, BenchmarkConfiguration cfg, OperationCostModel cost)
+    public long BeginExperiment(string configHash, AlgorithmBase algorithm, BenchmarkConfiguration cfg, OperationCostModel cost) =>
+        BeginExperiment(configHash, algorithm.Name, algorithm.Complexity, cfg, cost);
+
+    /// <summary>
+    /// Перегрузка для экспериментов без объекта алгоритма
+    /// (например, двумерный матричный A(n×m)·B(m×n)).
+    /// </summary>
+    public long BeginExperiment(string configHash, string algorithmName, string complexity, BenchmarkConfiguration cfg, OperationCostModel cost)
     {
         using var connection = OpenConnection();
         using var cmd = connection.CreateCommand();
@@ -165,8 +229,8 @@ public sealed class BenchmarkDatabase : IDisposable
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@hash", configHash);
-        cmd.Parameters.AddWithValue("@name", algorithm.Name);
-        cmd.Parameters.AddWithValue("@complexity", algorithm.Complexity);
+        cmd.Parameters.AddWithValue("@name", algorithmName);
+        cmd.Parameters.AddWithValue("@complexity", complexity);
         cmd.Parameters.AddWithValue("@startN", cfg.StartN);
         cmd.Parameters.AddWithValue("@nMax", cfg.EndN);
         cmd.Parameters.AddWithValue("@stepN", cfg.StepN);
@@ -183,17 +247,18 @@ public sealed class BenchmarkDatabase : IDisposable
     }
 
     /// <summary>Сохраняет один запуск точки: n, номер запуска, время, число операций, теория.</summary>
-    public void SaveMeasurement(long experimentId, long n, int runNumber, double elapsedNs, double stepCount, double theoreticalNs)
+    public void SaveMeasurement(long experimentId, long n, int runNumber, double elapsedNs, double stepCount, double theoreticalNs, long m = 1)
     {
         using var connection = OpenConnection();
         using var cmd = connection.CreateCommand();
         cmd.CommandText =
             """
-            INSERT INTO Measurements (ExperimentId, N, RunNumber, ElapsedTimeNs, StepCount, TheoreticalNs, ExperimentDate)
-            VALUES (@expId, @n, @run, @elapsed, @steps, @theoretical, @date);
+            INSERT INTO Measurements (ExperimentId, N, M, RunNumber, ElapsedTimeNs, StepCount, TheoreticalNs, ExperimentDate)
+            VALUES (@expId, @n, @m, @run, @elapsed, @steps, @theoretical, @date);
             """;
         cmd.Parameters.AddWithValue("@expId", experimentId);
         cmd.Parameters.AddWithValue("@n", n);
+        cmd.Parameters.AddWithValue("@m", m);
         cmd.Parameters.AddWithValue("@run", runNumber);
         cmd.Parameters.AddWithValue("@elapsed", elapsedNs);
         cmd.Parameters.AddWithValue("@steps", stepCount);
@@ -220,24 +285,27 @@ public sealed class BenchmarkDatabase : IDisposable
     }
 
     /// <summary>
-    /// КЭШ: возвращает отдельные запуски точки (n) из последнего эксперимента
-    /// с данным ключом конфигурации. false — если данных нет.
+    /// КЭШ: возвращает отдельные запуски точки из последнего эксперимента
+    /// с данным ключом конфигурации. <paramref name="m"/> — внутреннее
+    /// измерение матричного эксперимента A(n×m)·B(m×n); для одномерных
+    /// замеров передаётся 1. false — если данных нет.
     /// </summary>
-    public bool TryGetCachedRuns(string configHash, long n, out IReadOnlyList<double> runTimesNs)
+    public bool TryGetCachedRuns(string configHash, long n, long m, out IReadOnlyList<double> runTimesNs)
     {
         runTimesNs = Array.Empty<double>();
         using var connection = OpenConnection();
         using var cmd = connection.CreateCommand();
         cmd.CommandText =
             """
-            SELECT m.ExperimentId, m.ElapsedTimeNs
-            FROM Measurements m
-            JOIN Experiments e ON e.Id = m.ExperimentId
-            WHERE e.ConfigHash = @hash AND m.N = @n
-            ORDER BY m.ExperimentId DESC, m.RunNumber ASC;
+            SELECT mm.ExperimentId, mm.ElapsedTimeNs
+            FROM Measurements mm
+            JOIN Experiments e ON e.Id = mm.ExperimentId
+            WHERE e.ConfigHash = @hash AND mm.N = @n AND mm.M = @m
+            ORDER BY mm.ExperimentId DESC, mm.RunNumber ASC;
             """;
         cmd.Parameters.AddWithValue("@hash", configHash);
         cmd.Parameters.AddWithValue("@n", n);
+        cmd.Parameters.AddWithValue("@m", m);
 
         var runs = new List<double>();
         using (var reader = cmd.ExecuteReader())

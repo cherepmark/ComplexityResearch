@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using ComplexityResearch.Algorithms;
 using ComplexityResearch.Models;
 using ComplexityResearch.Services;
@@ -56,17 +56,17 @@ public class DatabaseTests : IDisposable
                 stepCount: 25_000, theoreticalNs: 60_000);
         }
 
-        Assert.True(db.TryGetCachedRuns(hash, 5000, out var cached));
+        Assert.True(db.TryGetCachedRuns(hash, 5000, m: 1, out var cached));
         Assert.Equal(3, cached.Count);
         Assert.Equal(runs, cached.ToArray());
 
         // Другой n — нет в кэше.
-        Assert.False(db.TryGetCachedRuns(hash, 6000, out _));
+        Assert.False(db.TryGetCachedRuns(hash, 6000, m: 1, out _));
         // Другой хэш конфигурации — нет в кэше.
         var cfg2 = cfg.Clone();
         cfg2.RunsPerPoint = 5;
         string hash2 = BenchmarkDatabase.ComputeConfigHash(algo, cfg2, cost, "TIME");
-        Assert.False(db.TryGetCachedRuns(hash2, 5000, out _));
+        Assert.False(db.TryGetCachedRuns(hash2, 5000, m: 1, out _));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class DatabaseTests : IDisposable
         db.SaveMeasurement(exp2, 50, 1, 10.0, 100, 100);
         db.SaveMeasurement(exp2, 50, 2, 20.0, 100, 100);
 
-        Assert.True(db.TryGetCachedRuns(hash, 50, out var cached));
+        Assert.True(db.TryGetCachedRuns(hash, 50, m: 1, out var cached));
         Assert.Equal(2, cached.Count);
         Assert.Equal(new[] { 10.0, 20.0 }, cached.ToArray()); // свежий эксперимент, не смесь
     }
@@ -105,7 +105,7 @@ public class DatabaseTests : IDisposable
         Assert.Equal(1, deleted);
         Assert.Equal(0, db.CountExperiments());
         Assert.Equal(0, db.CountMeasurements());
-        Assert.False(db.TryGetCachedRuns(hash, 50, out _));
+        Assert.False(db.TryGetCachedRuns(hash, 50, m: 1, out _));
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class DatabaseTests : IDisposable
             db.SaveMeasurement(expId, 100, i + 1, runs[i], 500, 2500);
         }
 
-        db.TryGetCachedRuns(hash, 100, out var cached);
+        db.TryGetCachedRuns(hash, 100, m: 1, out var cached);
         var fromCache = StatisticsService.BuildResult(algo, 100, cached, 5, OperationCostModel.CreateDefault(), fromCache: true);
         var fromRaw = MakeResult(100, runs);
 

@@ -151,4 +151,53 @@ public sealed class MatrixMultiplicationAlgorithm : AlgorithmBase
 
     /// <inheritdoc />
     public override Func<double, double> ComplexityFunction => n => n * n * n;
+
+    /// <summary>
+    /// Ядро эксперимента «A(n×m)·B(m×n)»: умножение ПРЯМОУГОЛЬНЫХ матриц
+    /// (публично — для unit-тестов). A имеет размер n×m, B — m×n,
+    /// результат C — n×n; внутренних операций n²·m.
+    /// </summary>
+    public static void MultiplyNM(int[,] a, int[,] b, int[,] c)
+    {
+        int n = a.GetLength(0); // строки A
+        int m = a.GetLength(1); // столбцы A = строки B
+        int p = b.GetLength(1); // столбцы B (в эксперименте p = n)
+
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < p; j++)
+            {
+                c[i, j] = 0;
+            }
+        }
+        for (int i = 0; i < n; i++)
+        {
+            for (int k = 0; k < m; k++)
+            {
+                int aik = a[i, k];
+                if (aik == 0) continue;
+                for (int j = 0; j < p; j++)
+                {
+                    c[i, j] += aik * b[k, j];
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Оценка количества элементарных операций для A(n×m)·B(m×n):
+    /// n²·m умножений и n²·m сложений во внутреннем цикле плюс накладные
+    /// расходы циклов (приближённо).
+    /// </summary>
+    public static OperationCounts EstimateOperationCountsNM(long n, long m)
+    {
+        double inner = n * (double)n * m; // n²·m
+        return new OperationCounts(
+            Addition: 2 * inner,
+            Multiplication: inner,
+            Comparison: 2 * inner + n * (double)n,
+            Assignment: 2 * inner + n * (double)n,
+            Swap: 0,
+            ArrayAccess: 4 * inner);
+    }
 }

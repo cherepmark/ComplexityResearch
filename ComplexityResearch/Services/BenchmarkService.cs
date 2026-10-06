@@ -1,4 +1,4 @@
-using ComplexityResearch.Algorithms;
+﻿using ComplexityResearch.Algorithms;
 using ComplexityResearch.Models;
 
 namespace ComplexityResearch.Services;
@@ -95,7 +95,7 @@ public sealed class BenchmarkService
 
                 // --- Кэш: точка уже измерена с этой конфигурацией? ---
                 if (database != null && useCache && !forceRecalculation &&
-                    database.TryGetCachedRuns(configHash, n, out var cachedRuns) &&
+                    database.TryGetCachedRuns(configHash, n, m: 1, out var cachedRuns) &&
                     cachedRuns.Count == config.RunsPerPoint)
                 {
                     times = cachedRuns;
