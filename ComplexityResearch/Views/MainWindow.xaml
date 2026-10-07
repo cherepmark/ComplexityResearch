@@ -189,13 +189,34 @@
                               IsChecked="{Binding OverlayPrevious}"
                               VerticalAlignment="Center" Margin="0,0,10,0"
                               ToolTip="Серии предыдущего эксперимента будут показаны на одних координатах с текущими (пунктиром, с пометкой «пред.»)"/>
+                    <TextBlock Text="Вид A(n×m)·B(m×n):" VerticalAlignment="Center" Margin="14,0,4,0"/>
+                    <RadioButton x:Name="ViewModeSurface" Content="3D-поверхность" IsChecked="True"
+                                 GroupName="MatrixView" VerticalAlignment="Center" Margin="0,0,6,0"
+                                 Checked="MatrixViewMode_Changed"/>
+                    <RadioButton x:Name="ViewModeHeatmap" Content="Тепловая карта"
+                                 GroupName="MatrixView" VerticalAlignment="Center" Margin="0,0,6,0"
+                                 Checked="MatrixViewMode_Changed"/>
                 </StackPanel>
             </DockPanel>
 
-            <!-- График (линии) и тепловая карта (A(n×m)·B(m×n)) — показывается один из них -->
+            <!-- График (линии), 3D-поверхность и тепловая карта — показывается один из них -->
             <Grid Grid.Row="1">
                 <Border x:Name="ChartHost" Background="White" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4">
                     <controls:ChartControl x:Name="Chart"/>
+                </Border>
+                <Border x:Name="Surface3DHost" Background="#1E1E1E" BorderBrush="#DDDDDD" BorderThickness="1"
+                        CornerRadius="4" Visibility="Collapsed">
+                    <Grid>
+                        <controls:Surface3DControl x:Name="Surface3D"/>
+                        <TextBlock x:Name="SurfaceRangeText" Foreground="#CCCCCC" FontSize="11"
+                                   Margin="10" VerticalAlignment="Top" HorizontalAlignment="Left"/>
+                        <Button Content="Сбросить вид" Click="ResetSurfaceView_Click"
+                                Margin="10" VerticalAlignment="Top" HorizontalAlignment="Right"
+                                Padding="8,3"/>
+                        <TextBlock Text="ЛКМ — вращение, колесо — зум, двойной клик — сброс"
+                                   Foreground="#999999" FontSize="10"
+                                   Margin="10" VerticalAlignment="Bottom" HorizontalAlignment="Left"/>
+                    </Grid>
                 </Border>
                 <Border x:Name="HeatmapHost" Background="White" BorderBrush="#DDDDDD" BorderThickness="1"
                         CornerRadius="4" Visibility="Collapsed">

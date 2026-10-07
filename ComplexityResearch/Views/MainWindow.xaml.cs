@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private void OnExperimentCompleted(object? sender, ChartData data)
     {
         HeatmapHost.Visibility = Visibility.Collapsed;
+        Surface3DHost.Visibility = Visibility.Collapsed;
         ChartHost.Visibility = Visibility.Visible;
 
         var series = data.Series.Select(s => new ChartSeries
@@ -44,13 +45,39 @@ public partial class MainWindow : Window
         Chart.SetData(data.Title, "Размер входных данных n", "Время, с", series);
     }
 
-    /// <summary>Показывает тепловую карту A(n×m)·B(m×n) вместо линейного графика.</summary>
+    private HeatmapData? _lastHeatmapData;
+
+    /// <summary>Показывает 3D-поверхность (или тепловую карту) A(n×m)·B(m×n) вместо линейного графика.</summary>
     private void OnHeatmapCompleted(object? sender, HeatmapData data)
     {
         ChartHost.Visibility = Visibility.Collapsed;
-        HeatmapHost.Visibility = Visibility.Visible;
+        _lastHeatmapData = data;
+
+        Surface3D.SetData(data);
         Heatmap.SetData(data);
+
+        if (Surface3D.LastRange is { } r)
+        {
+            SurfaceRangeText.Text =
+                $"n: {r.minN:N0}–{r.maxN:N0}   m: {r.minM:N0}–{r.maxM:N0}   " +
+                $"время: {r.minValue * 1000:F3}–{r.maxValue * 1000:F3} мс";
+        }
+
+        ApplyMatrixViewMode();
     }
+
+    /// <summary>Переключает между 3D-поверхностью и тепловой картой для уже построенных данных.</summary>
+    private void ApplyMatrixViewMode()
+    {
+        if (_lastHeatmapData == null) return;
+        bool showSurface = ViewModeSurface.IsChecked == true;
+        Surface3DHost.Visibility = showSurface ? Visibility.Visible : Visibility.Collapsed;
+        HeatmapHost.Visibility = showSurface ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void MatrixViewMode_Changed(object sender, RoutedEventArgs e) => ApplyMatrixViewMode();
+
+    private void ResetSurfaceView_Click(object sender, RoutedEventArgs e) => Surface3D.ResetView();
 
     /// <summary>Сохраняет видимую визуализацию (график или карту) в PNG.</summary>
     private void OnPngExportRequested(object? sender, string fileName)
@@ -63,7 +90,13 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() != true) return;
         try
         {
-            if (HeatmapHost.Visibility == Visibility.Visible)
+            if (Surface3DHost.Visibility == Visibility.Visible)
+            {
+                MessageBox.Show("Для 3D-поверхности используйте снимок окна (Win+Shift+S) — "
+                    + "экспорт в PNG пока реализован только для графика и тепловой карты.",
+                    "Экспорт графика", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else if (HeatmapHost.Visibility == Visibility.Visible)
             {
                 Heatmap.ExportPng(dialog.FileName);
             }
